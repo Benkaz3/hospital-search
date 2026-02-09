@@ -4,7 +4,10 @@
   "description": "Vietnamese hospital search for Notion embed — static site with fuzzy search",
   "scripts": {
     "fetch-data": "node scripts/fetch-osm.js",
+    "geocode": "node scripts/reverse-geocode.js",
     "normalize": "node scripts/normalize-cities.js",
+    "aliases": "node scripts/build-district-aliases.js",
+    "enrich": "npm run geocode && npm run normalize && npm run aliases",
     "to-csv": "node scripts/json-to-csv.js",
     "from-csv": "node scripts/csv-to-json.js",
     "serve": "npx serve ."

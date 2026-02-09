@@ -39,13 +39,17 @@ async function init() {
     if (!res.ok) throw new Error("Failed to load data");
     allHospitals = await res.json();
 
-    // Build Fuse index — search on both Vietnamese and ASCII fields
+    // Build Fuse index — search on Vietnamese, ASCII, and alias fields
     fuse = new Fuse(allHospitals, {
       keys: [
         { name: "name", weight: 3 },
         { name: "nameAscii", weight: 3 },
         { name: "district", weight: 2 },
         { name: "districtAscii", weight: 2 },
+        { name: "oldDistrict", weight: 2 },
+        { name: "oldProvince", weight: 1 },
+        { name: "aliases", weight: 2 },
+        { name: "aliasesAscii", weight: 2 },
         { name: "city", weight: 1 },
         { name: "cityAscii", weight: 1 },
         { name: "address", weight: 1 },
@@ -70,9 +74,13 @@ async function init() {
 /* ─── Populate Filter Dropdowns ─────────────────────────────────────────── */
 
 function populateFilters() {
-  const cities = [
-    ...new Set(allHospitals.map((h) => h.city).filter(Boolean)),
-  ].sort((a, b) => a.localeCompare(b, "vi"));
+  // Collect cities: current + old provinces from aliases
+  const citySet = new Set();
+  for (const h of allHospitals) {
+    if (h.city) citySet.add(h.city);
+    if (h.oldProvince) citySet.add(h.oldProvince);
+  }
+  const cities = [...citySet].sort((a, b) => a.localeCompare(b, "vi"));
 
   for (const city of cities) {
     const opt = document.createElement("option");
@@ -87,12 +95,21 @@ function populateFilters() {
 function updateDistrictFilter() {
   const selectedCity = cityFilter.value;
   const filtered = selectedCity
-    ? allHospitals.filter((h) => h.city === selectedCity)
+    ? allHospitals.filter(
+        (h) =>
+          h.city === selectedCity ||
+          h.oldProvince === selectedCity ||
+          (h.aliases && h.aliases.includes(selectedCity)),
+      )
     : allHospitals;
 
-  const districts = [
-    ...new Set(filtered.map((h) => h.district).filter(Boolean)),
-  ].sort((a, b) => a.localeCompare(b, "vi"));
+  // Collect both current and old district names
+  const districtSet = new Set();
+  for (const h of filtered) {
+    if (h.district) districtSet.add(h.district);
+    if (h.oldDistrict) districtSet.add(h.oldDistrict);
+  }
+  const districts = [...districtSet].sort((a, b) => a.localeCompare(b, "vi"));
 
   // Preserve current selection if still valid
   const current = districtFilter.value;
@@ -128,12 +145,22 @@ function getFilteredResults() {
     results = [...allHospitals];
   }
 
-  // Apply dropdown filters
+  // Apply dropdown filters (match current names OR old aliases)
   if (city) {
-    results = results.filter((h) => h.city === city);
+    results = results.filter(
+      (h) =>
+        h.city === city ||
+        h.oldProvince === city ||
+        (h.aliases && h.aliases.includes(city)),
+    );
   }
   if (district) {
-    results = results.filter((h) => h.district === district);
+    results = results.filter(
+      (h) =>
+        h.district === district ||
+        h.oldDistrict === district ||
+        (h.aliases && h.aliases.includes(district)),
+    );
   }
 
   return results;
@@ -222,9 +249,18 @@ function cardHTML(h) {
     ? `<a href="${h.website}" target="_blank" rel="noopener">Website</a>`
     : "";
 
+  // Build location line: district, city (prefer old district name for familiarity)
+  const locParts = [];
+  if (h.oldDistrict) locParts.push(h.oldDistrict);
+  else if (h.district) locParts.push(h.district);
+  if (h.oldProvince) locParts.push(h.oldProvince);
+  else if (h.city) locParts.push(h.city);
+  const locationLine = locParts.length > 0 ? locParts.join(", ") : "";
+
   return `
     <div class="card ${typeClass}">
       <div class="card-name">${escapeHTML(h.name)}</div>
+      ${locationLine ? `<div class="card-location">${escapeHTML(locationLine)}</div>` : ""}
       ${h.address ? `<div class="card-address">${escapeHTML(h.address)}</div>` : ""}
       <div class="card-meta">
         ${phonePart}${mapPart}${webPart}

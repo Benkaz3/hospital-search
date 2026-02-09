@@ -235,6 +235,13 @@ body {
   line-height: 1.3;
 }
 
+.card-location {
+  font-size: 0.82rem;
+  color: var(--accent);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
 .card-address {
   font-size: 0.82rem;
   color: var(--text-secondary);
