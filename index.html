@@ -17,19 +17,23 @@
           <input
             type="text"
             id="searchInput"
-            placeholder="Nhập tên bệnh viện, quận, thành phố..."
+            placeholder="Nhập tên bệnh viện..."
             autocomplete="off"
           />
           <button id="clearBtn" class="clear-btn hidden" aria-label="Xoá">&times;</button>
         </div>
 
         <div class="filters">
-          <select id="cityFilter">
-            <option value="">Tất cả thành phố</option>
-          </select>
-          <select id="districtFilter">
-            <option value="">Tất cả quận/huyện</option>
-          </select>
+          <div class="combobox" id="provinceCombo">
+            <input type="text" placeholder="Tỉnh/Thành phố" autocomplete="off" />
+            <button class="combo-clear hidden" aria-label="Xoá">&times;</button>
+            <div class="combo-list hidden"></div>
+          </div>
+          <div class="combobox" id="districtCombo">
+            <input type="text" placeholder="Quận/Huyện" autocomplete="off" />
+            <button class="combo-clear hidden" aria-label="Xoá">&times;</button>
+            <div class="combo-list hidden"></div>
+          </div>
         </div>
       </div>
 

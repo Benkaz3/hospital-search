@@ -7,12 +7,159 @@ function removeDiacritics(str) {
     .replace(/đ/gi, "d");
 }
 
+/* ─── Combobox Component ───────────────────────────────────────────────── */
+
+function createCombobox(container, options) {
+  const input = container.querySelector("input");
+  const clearBtn = container.querySelector(".combo-clear");
+  const list = container.querySelector(".combo-list");
+
+  let allOptions = []; // [{value, label, ascii}]
+  let selectedValue = "";
+  let activeIndex = -1;
+  let isOpen = false;
+
+  function setOptions(opts) {
+    allOptions = opts.map((o) => ({
+      value: o,
+      label: o,
+      ascii: removeDiacritics(o.toLowerCase()),
+    }));
+  }
+
+  function open() {
+    if (isOpen) return;
+    isOpen = true;
+    renderList(input.value);
+    list.classList.remove("hidden");
+  }
+
+  function close() {
+    isOpen = false;
+    activeIndex = -1;
+    list.classList.add("hidden");
+  }
+
+  function select(value) {
+    selectedValue = value;
+    input.value = value;
+    input.classList.toggle("has-value", !!value);
+    clearBtn.classList.toggle("hidden", !value);
+    close();
+    container.dispatchEvent(new Event("change"));
+  }
+
+  function renderList(filter) {
+    const query = removeDiacritics((filter || "").toLowerCase().trim());
+    const filtered = query
+      ? allOptions.filter((o) => o.ascii.includes(query))
+      : allOptions;
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="combo-empty">Không tìm thấy</div>';
+      activeIndex = -1;
+      return;
+    }
+
+    list.innerHTML = filtered
+      .map((o, i) => {
+        const highlighted = highlightMatch(o.label, query);
+        return `<div class="combo-item${i === activeIndex ? " active" : ""}" data-value="${escapeAttr(o.value)}">${highlighted}</div>`;
+      })
+      .join("");
+
+    // Click handlers
+    list.querySelectorAll(".combo-item").forEach((el) => {
+      el.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // prevent input blur
+        select(el.dataset.value);
+      });
+    });
+  }
+
+  function highlightMatch(label, query) {
+    if (!query) return escapeHTML(label);
+    const ascii = removeDiacritics(label.toLowerCase());
+    const idx = ascii.indexOf(query);
+    if (idx === -1) return escapeHTML(label);
+    const before = label.slice(0, idx);
+    const match = label.slice(idx, idx + query.length);
+    const after = label.slice(idx + query.length);
+    return escapeHTML(before) + "<mark>" + escapeHTML(match) + "</mark>" + escapeHTML(after);
+  }
+
+  // Events
+  input.addEventListener("focus", () => {
+    open();
+  });
+
+  input.addEventListener("input", () => {
+    selectedValue = ""; // clear selection while typing
+    input.classList.remove("has-value");
+    activeIndex = -1;
+    open();
+    renderList(input.value);
+    // Trigger filtering on each keystroke (debounced by main handler)
+    container.dispatchEvent(new Event("input"));
+  });
+
+  input.addEventListener("blur", () => {
+    // If typed text doesn't match any option, revert
+    setTimeout(() => {
+      if (!selectedValue) {
+        input.value = "";
+        clearBtn.classList.add("hidden");
+        container.dispatchEvent(new Event("change"));
+      }
+      close();
+    }, 150);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    const items = list.querySelectorAll(".combo-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      updateActive(items);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIndex = Math.max(activeIndex - 1, 0);
+      updateActive(items);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) {
+        select(items[activeIndex].dataset.value);
+      }
+    } else if (e.key === "Escape") {
+      close();
+      input.blur();
+    }
+  });
+
+  function updateActive(items) {
+    items.forEach((el, i) => el.classList.toggle("active", i === activeIndex));
+    if (items[activeIndex]) {
+      items[activeIndex].scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  clearBtn.addEventListener("click", () => {
+    select("");
+    input.focus();
+  });
+
+  return {
+    setOptions,
+    getValue: () => selectedValue,
+    setValue: (v) => select(v),
+    clear: () => select(""),
+  };
+}
+
 /* ─── DOM refs ──────────────────────────────────────────────────────────── */
 
 const searchInput = document.getElementById("searchInput");
 const clearBtn = document.getElementById("clearBtn");
-const cityFilter = document.getElementById("cityFilter");
-const districtFilter = document.getElementById("districtFilter");
 const publicList = document.getElementById("publicList");
 const privateList = document.getElementById("privateList");
 const publicCount = document.getElementById("publicCount");
@@ -24,6 +171,9 @@ const toggleUnclassified = document.getElementById("toggleUnclassified");
 const resultSummary = document.getElementById("resultSummary");
 const emptyState = document.getElementById("emptyState");
 const loadingEl = document.getElementById("loading");
+
+const provinceCombo = createCombobox(document.getElementById("provinceCombo"));
+const districtCombo = createCombobox(document.getElementById("districtCombo"));
 
 /* ─── State ─────────────────────────────────────────────────────────────── */
 
@@ -39,22 +189,18 @@ async function init() {
     if (!res.ok) throw new Error("Failed to load data");
     allHospitals = await res.json();
 
-    // Build Fuse index — search on Vietnamese, ASCII, and alias fields
+    // Build Fuse index — name-heavy, location as secondary
     fuse = new Fuse(allHospitals, {
       keys: [
-        { name: "name", weight: 3 },
-        { name: "nameAscii", weight: 3 },
-        { name: "district", weight: 2 },
-        { name: "districtAscii", weight: 2 },
+        { name: "name", weight: 4 },
+        { name: "nameAscii", weight: 4 },
         { name: "oldDistrict", weight: 2 },
-        { name: "oldProvince", weight: 1 },
-        { name: "newWard", weight: 2 },
-        { name: "newProvince", weight: 1 },
-        { name: "aliases", weight: 2 },
-        { name: "aliasesAscii", weight: 2 },
-        { name: "city", weight: 1 },
-        { name: "cityAscii", weight: 1 },
-        { name: "address", weight: 1 },
+        { name: "oldProvince", weight: 1.5 },
+        { name: "aliases", weight: 1.5 },
+        { name: "aliasesAscii", weight: 1.5 },
+        { name: "newWard", weight: 0.5 },
+        { name: "newProvince", weight: 0.5 },
+        { name: "address", weight: 0.5 },
       ],
       threshold: 0.35,
       distance: 200,
@@ -64,7 +210,6 @@ async function init() {
 
     populateFilters();
     loadingEl.classList.add("hidden");
-    // Show prompt to search instead of rendering all 1400+ cards
     showWelcome();
   } catch (err) {
     loadingEl.innerHTML =
@@ -76,69 +221,41 @@ async function init() {
 /* ─── Populate Filter Dropdowns ─────────────────────────────────────────── */
 
 function populateFilters() {
-  // Collect cities: current + old provinces from aliases
-  const citySet = new Set();
+  // Collect old provinces (63 provinces)
+  const provinceSet = new Set();
   for (const h of allHospitals) {
-    if (h.city) citySet.add(h.city);
-    if (h.oldProvince) citySet.add(h.oldProvince);
+    if (h.oldProvince) provinceSet.add(h.oldProvince);
   }
-  const cities = [...citySet].sort((a, b) => a.localeCompare(b, "vi"));
+  const provinces = [...provinceSet].sort((a, b) => a.localeCompare(b, "vi"));
+  provinceCombo.setOptions(provinces);
 
-  for (const city of cities) {
-    const opt = document.createElement("option");
-    opt.value = city;
-    opt.textContent = city;
-    cityFilter.appendChild(opt);
-  }
-
-  updateDistrictFilter();
+  updateDistrictOptions();
 }
 
-function updateDistrictFilter() {
-  const selectedCity = cityFilter.value;
-  const filtered = selectedCity
-    ? allHospitals.filter(
-        (h) =>
-          h.city === selectedCity ||
-          h.oldProvince === selectedCity ||
-          (h.aliases && h.aliases.includes(selectedCity)),
-      )
+function updateDistrictOptions() {
+  const selectedProvince = provinceCombo.getValue();
+  const filtered = selectedProvince
+    ? allHospitals.filter((h) => h.oldProvince === selectedProvince)
     : allHospitals;
 
-  // Collect only old district names (familiar to users)
   const districtSet = new Set();
   for (const h of filtered) {
     if (h.oldDistrict) districtSet.add(h.oldDistrict);
   }
   const districts = [...districtSet].sort((a, b) => a.localeCompare(b, "vi"));
-
-  // Preserve current selection if still valid
-  const current = districtFilter.value;
-  districtFilter.innerHTML = '<option value="">Tất cả quận/huyện</option>';
-
-  for (const d of districts) {
-    const opt = document.createElement("option");
-    opt.value = d;
-    opt.textContent = d;
-    districtFilter.appendChild(opt);
-  }
-
-  if (districts.includes(current)) {
-    districtFilter.value = current;
-  }
+  districtCombo.setOptions(districts);
 }
 
 /* ─── Search & Filter ───────────────────────────────────────────────────── */
 
 function getFilteredResults() {
   const query = searchInput.value.trim();
-  const city = cityFilter.value;
-  const district = districtFilter.value;
+  const province = provinceCombo.getValue();
+  const district = districtCombo.getValue();
 
   let results;
 
   if (query) {
-    // Fuse search — also search the ASCII version of the query
     const asciiQuery = removeDiacritics(query);
     const fuseResults = fuse.search(asciiQuery);
     results = fuseResults.map((r) => r.item);
@@ -146,22 +263,12 @@ function getFilteredResults() {
     results = [...allHospitals];
   }
 
-  // Apply dropdown filters (match current names OR old aliases)
-  if (city) {
-    results = results.filter(
-      (h) =>
-        h.city === city ||
-        h.oldProvince === city ||
-        (h.aliases && h.aliases.includes(city)),
-    );
+  // Hard filters: oldProvince and oldDistrict
+  if (province) {
+    results = results.filter((h) => h.oldProvince === province);
   }
   if (district) {
-    results = results.filter(
-      (h) =>
-        h.district === district ||
-        h.oldDistrict === district ||
-        (h.aliases && h.aliases.includes(district)),
-    );
+    results = results.filter((h) => h.oldDistrict === district);
   }
 
   return results;
@@ -181,8 +288,21 @@ function showWelcome() {
   emptyState.classList.remove("hidden");
   emptyState.innerHTML = `
     <p>Tìm kiếm bệnh viện trên toàn quốc</p>
-    <p class="hint">${allHospitals.length} bệnh viện trong cơ sở dữ liệu. Nhập tên, quận, hoặc thành phố để bắt đầu.</p>
+    <p class="hint">${allHospitals.length} bệnh viện trong cơ sở dữ liệu. Nhập tên, chọn tỉnh hoặc quận/huyện để bắt đầu.</p>
   `;
+}
+
+/* ─── Trigger search/render ─────────────────────────────────────────────── */
+
+function triggerUpdate() {
+  const query = searchInput.value.trim();
+  const province = provinceCombo.getValue();
+  const district = districtCombo.getValue();
+  if (!query && !province && !district) {
+    showWelcome();
+  } else {
+    render(getFilteredResults());
+  }
 }
 
 /* ─── Render ────────────────────────────────────────────────────────────── */
@@ -223,6 +343,10 @@ function render(hospitals) {
   } else {
     resultSummary.classList.add("hidden");
     emptyState.classList.remove("hidden");
+    emptyState.innerHTML = `
+      <p>Không tìm thấy bệnh viện phù hợp.</p>
+      <p class="hint">Thử tìm kiếm với từ khoá khác hoặc bỏ bớt bộ lọc.</p>
+    `;
   }
 
   // Show/hide columns when empty
@@ -285,41 +409,34 @@ function escapeHTML(str) {
   return el.innerHTML;
 }
 
+function escapeAttr(str) {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
 /* ─── Event Listeners ───────────────────────────────────────────────────── */
 
 searchInput.addEventListener("input", () => {
   clearBtn.classList.toggle("hidden", !searchInput.value);
   clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(() => {
-    const query = searchInput.value.trim();
-    const city = cityFilter.value;
-    const district = districtFilter.value;
-    if (!query && !city && !district) {
-      showWelcome();
-    } else {
-      render(getFilteredResults());
-    }
-  }, 150);
+  debounceTimer = setTimeout(triggerUpdate, 150);
 });
 
 clearBtn.addEventListener("click", () => {
   searchInput.value = "";
   clearBtn.classList.add("hidden");
   searchInput.focus();
-  if (!cityFilter.value && !districtFilter.value) {
-    showWelcome();
-  } else {
-    render(getFilteredResults());
-  }
+  triggerUpdate();
 });
 
-cityFilter.addEventListener("change", () => {
-  updateDistrictFilter();
-  render(getFilteredResults());
+document.getElementById("provinceCombo").addEventListener("change", () => {
+  // Province changed — update district options and clear district selection
+  districtCombo.clear();
+  updateDistrictOptions();
+  triggerUpdate();
 });
 
-districtFilter.addEventListener("change", () => {
-  render(getFilteredResults());
+document.getElementById("districtCombo").addEventListener("change", () => {
+  triggerUpdate();
 });
 
 toggleUnclassified.addEventListener("click", () => {
