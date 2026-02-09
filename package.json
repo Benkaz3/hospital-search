@@ -1,0 +1,12 @@
+{
+  "name": "hospital-search",
+  "version": "1.0.0",
+  "description": "Vietnamese hospital search for Notion embed — static site with fuzzy search",
+  "scripts": {
+    "fetch-data": "node scripts/fetch-osm.js",
+    "serve": "npx serve ."
+  },
+  "devDependencies": {
+    "serve": "^14.0.0"
+  }
+}

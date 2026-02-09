@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tìm Bệnh Viện</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Search bar -->
+      <div class="search-section">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Nhập tên bệnh viện, quận, thành phố..."
+            autocomplete="off"
+          />
+          <button id="clearBtn" class="clear-btn hidden" aria-label="Xoá">&times;</button>
+        </div>
+
+        <div class="filters">
+          <select id="cityFilter">
+            <option value="">Tất cả thành phố</option>
+          </select>
+          <select id="districtFilter">
+            <option value="">Tất cả quận/huyện</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Result counts -->
+      <div id="resultSummary" class="result-summary hidden"></div>
+
+      <!-- Results -->
+      <div class="results-container">
+        <div class="results-column" id="publicCol">
+          <h2 class="col-header public-header">
+            <span class="dot dot-public"></span>
+            Bệnh viện Công
+            <span class="count" id="publicCount">0</span>
+          </h2>
+          <div id="publicList" class="card-list"></div>
+        </div>
+
+        <div class="results-column" id="privateCol">
+          <h2 class="col-header private-header">
+            <span class="dot dot-private"></span>
+            Bệnh viện Tư
+            <span class="count" id="privateCount">0</span>
+          </h2>
+          <div id="privateList" class="card-list"></div>
+        </div>
+      </div>
+
+      <!-- Unclassified (collapsed by default) -->
+      <div id="unclassifiedSection" class="unclassified-section hidden">
+        <button id="toggleUnclassified" class="toggle-btn">
+          Chưa phân loại (<span id="unclassifiedCount">0</span>)
+          <span class="chevron">&#9660;</span>
+        </button>
+        <div id="unclassifiedList" class="card-list collapsed"></div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="emptyState" class="empty-state hidden">
+        <p>Không tìm thấy bệnh viện phù hợp.</p>
+        <p class="hint">Thử tìm kiếm với từ khoá khác hoặc bỏ bớt bộ lọc.</p>
+      </div>
+
+      <!-- Loading -->
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Đang tải dữ liệu...</p>
+      </div>
+    </div>
+
+    <script src="lib/fuse.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
