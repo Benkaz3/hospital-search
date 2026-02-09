@@ -1,8 +1,11 @@
 /**
- * Builds old district alias mapping from the vietnamadminunits data.
+ * Builds old district + new ward mapping from the vietnamadminunits data.
  *
- * For each hospital, determines which OLD district (pre-2025 reform) it belongs to
- * using GPS bounding boxes, then adds the old district name as a searchable alias.
+ * For each hospital:
+ * 1. Determines which OLD district (pre-2025 reform) it belongs to using GPS bounding boxes
+ * 2. Determines which NEW ward (post-2025 reform, 34-province system) it belongs to
+ *    using nearest-center matching within the correct new province
+ * 3. Adds all name variants as searchable aliases
  *
  * Also builds a district_aliases.json lookup file for reference.
  *
@@ -15,6 +18,7 @@ const path = require("path");
 const DATA_PATH = path.join(__dirname, "..", "data", "hospitals.json");
 const LEGACY_PATH = path.join(__dirname, "..", "data", "mapping", "legacy_63province.csv");
 const CONVERT_PATH = path.join(__dirname, "..", "data", "mapping", "convert_legacy_2025.csv");
+const NEW_PROVINCE_PATH = path.join(__dirname, "..", "data", "mapping", "new_34province.csv");
 const ALIASES_PATH = path.join(__dirname, "..", "data", "district_aliases.json");
 
 function removeDiacritics(str) {
@@ -199,9 +203,52 @@ function main() {
   fs.writeFileSync(ALIASES_PATH, JSON.stringify(aliasData, null, 2), "utf-8");
   console.log(`Saved ${Object.keys(aliasData).length} district alias entries.`);
 
-  // 4. For each hospital, find which old district it belongs to
+  // 4. Load new wards from new_34province.csv
+  const newWardRows = parseCSV(NEW_PROVINCE_PATH);
+  const newWards = [];
+  const newWardsByProvince = new Map(); // provinceShort → [ward, ...]
+
+  for (const row of newWardRows) {
+    const lat = parseFloat(row.wardLat);
+    const lon = parseFloat(row.wardLon);
+    if (isNaN(lat) || isNaN(lon)) continue;
+
+    const ward = {
+      province: row.province,
+      provinceShort: row.provinceShort,
+      ward: row.ward,
+      wardShort: row.wardShort,
+      wardType: row.wardType,
+      provinceCode: row.provinceCode,
+      wardCode: row.wardCode,
+      lat,
+      lon,
+      areaKm2: parseFloat(row.wardAreaKm2) || 0,
+    };
+    newWards.push(ward);
+
+    if (!newWardsByProvince.has(ward.provinceShort)) {
+      newWardsByProvince.set(ward.provinceShort, []);
+    }
+    newWardsByProvince.get(ward.provinceShort).push(ward);
+  }
+
+  console.log(`Loaded ${newWards.length} new wards across ${newWardsByProvince.size} new provinces.`);
+
+  // 5. Build old province → new province mapping for constraining ward search
+  const oldToNewProvince = new Map(); // oldProvinceShort → newProvinceShort
+  for (const row of convertRows) {
+    const oldProv = (row.provinceShort || "").trim();
+    const newProv = (row.newProvinceShort || "").trim();
+    if (oldProv && newProv && !oldToNewProvince.has(oldProv)) {
+      oldToNewProvince.set(oldProv, newProv);
+    }
+  }
+
+  // 6. For each hospital, find old district AND new ward
   const hospitals = JSON.parse(fs.readFileSync(DATA_PATH, "utf-8"));
-  let matched = 0;
+  let oldMatched = 0;
+  let newWardMatched = 0;
   let unmatched = 0;
 
   for (const h of hospitals) {
@@ -211,12 +258,11 @@ function main() {
       continue;
     }
 
-    // First try: bounding box containment
+    // ── Step A: Match to old district (bounding box + fallback) ──
     let bestMatch = null;
     let bestDist = Infinity;
 
     for (const d of oldDistricts) {
-      // Check bounding box first (fast)
       if (d.bounds && isInBounds(coords.lat, coords.lon, d.bounds)) {
         const dist = haversine(coords.lat, coords.lon, d.lat, d.lon);
         if (dist < bestDist) {
@@ -226,7 +272,6 @@ function main() {
       }
     }
 
-    // Fallback: nearest district center (within 15km)
     if (!bestMatch) {
       for (const d of oldDistricts) {
         const dist = haversine(coords.lat, coords.lon, d.lat, d.lon);
@@ -237,41 +282,70 @@ function main() {
       }
     }
 
+    // Build aliases
+    const aliases = new Set();
+
     if (bestMatch) {
       const key = `${bestMatch.provinceCode}|${bestMatch.districtCode}`;
       const alias = aliasData[key];
 
-      // Set old district info
       h.oldDistrict = bestMatch.districtShort;
       h.oldProvince = bestMatch.provinceShort;
 
-      // Build aliases array: all name variants users might search
-      const aliases = new Set();
-      aliases.add(bestMatch.district); // "Quận 2"
-      aliases.add(bestMatch.districtShort); // "2" or "Ba Đình"
-      aliases.add(bestMatch.provinceShort); // "Hồ Chí Minh"
+      aliases.add(bestMatch.district);
+      aliases.add(bestMatch.districtShort);
+      aliases.add(bestMatch.provinceShort);
 
-      // If province changed, add old province name
       if (alias && alias.provinceChanged) {
         aliases.add(alias.oldProvince);
       }
-      // Add new province too
       if (alias && alias.newProvince) {
         aliases.add(alias.newProvince);
       }
 
-      // Remove empty strings
-      aliases.delete("");
+      oldMatched++;
+    }
 
-      h.aliases = [...aliases];
-      h.aliasesAscii = [...aliases].map((a) =>
-        removeDiacritics(a.toLowerCase()),
-      );
+    // ── Step B: Match to new ward (nearest center within province) ──
+    const newProvShort = bestMatch
+      ? (oldToNewProvince.get(bestMatch.provinceShort) || bestMatch.provinceShort)
+      : null;
 
-      matched++;
-    } else {
-      h.aliases = [];
-      h.aliasesAscii = [];
+    let bestNewWard = null;
+    let bestNewDist = Infinity;
+
+    // Search within the correct new province first
+    const candidateWards = newProvShort && newWardsByProvince.has(newProvShort)
+      ? newWardsByProvince.get(newProvShort)
+      : newWards; // fallback: search all
+
+    for (const w of candidateWards) {
+      const dist = haversine(coords.lat, coords.lon, w.lat, w.lon);
+      if (dist < bestNewDist) {
+        bestNewDist = dist;
+        bestNewWard = w;
+      }
+    }
+
+    if (bestNewWard) {
+      h.newWard = bestNewWard.wardShort;
+      h.newProvince = bestNewWard.provinceShort;
+
+      aliases.add(bestNewWard.ward);       // "Phường Ba Đình"
+      aliases.add(bestNewWard.wardShort);   // "Ba Đình"
+      aliases.add(bestNewWard.provinceShort); // new province name
+
+      newWardMatched++;
+    }
+
+    aliases.delete("");
+
+    h.aliases = [...aliases];
+    h.aliasesAscii = [...aliases].map((a) =>
+      removeDiacritics(a.toLowerCase()),
+    );
+
+    if (!bestMatch && !bestNewWard) {
       unmatched++;
     }
   }
@@ -285,15 +359,19 @@ function main() {
 
   fs.writeFileSync(DATA_PATH, JSON.stringify(hospitals, null, 2), "utf-8");
 
-  console.log(`\nHospital alias matching:`);
-  console.log(`  Matched to old district: ${matched}`);
-  console.log(`  Unmatched: ${unmatched}`);
+  console.log(`\nHospital matching results:`);
+  console.log(`  Matched to old district: ${oldMatched}`);
+  console.log(`  Matched to new ward:     ${newWardMatched}`);
+  console.log(`  Unmatched:               ${unmatched}`);
 
-  // Show sample
-  const samples = hospitals.filter((h) => h.aliases && h.aliases.length > 0).slice(0, 5);
+  // Show samples
+  const samples = hospitals.filter((h) => h.newWard).slice(0, 5);
   console.log(`\nSample matches:`);
   for (const s of samples) {
-    console.log(`  ${s.name} → old: ${s.oldDistrict}, ${s.oldProvince} | aliases: [${s.aliases.join(", ")}]`);
+    console.log(`  ${s.name}`);
+    console.log(`    old: ${s.oldDistrict}, ${s.oldProvince}`);
+    console.log(`    new: ${s.newWard}, ${s.newProvince}`);
+    console.log(`    aliases: [${s.aliases.join(", ")}]`);
   }
 }
 

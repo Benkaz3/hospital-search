@@ -48,6 +48,8 @@ async function init() {
         { name: "districtAscii", weight: 2 },
         { name: "oldDistrict", weight: 2 },
         { name: "oldProvince", weight: 1 },
+        { name: "newWard", weight: 2 },
+        { name: "newProvince", weight: 1 },
         { name: "aliases", weight: 2 },
         { name: "aliasesAscii", weight: 2 },
         { name: "city", weight: 1 },
@@ -249,7 +251,7 @@ function cardHTML(h) {
     ? `<a href="${h.website}" target="_blank" rel="noopener">Website</a>`
     : "";
 
-  // Build location line: district, city (prefer old district name for familiarity)
+  // Build location lines: old district name (familiar) + new ward (official)
   const locParts = [];
   if (h.oldDistrict) locParts.push(h.oldDistrict);
   else if (h.district) locParts.push(h.district);
@@ -257,10 +259,19 @@ function cardHTML(h) {
   else if (h.city) locParts.push(h.city);
   const locationLine = locParts.length > 0 ? locParts.join(", ") : "";
 
+  // Show new ward if different from old district
+  let newLocLine = "";
+  if (h.newWard && h.newWard !== h.oldDistrict) {
+    const newParts = [h.newWard];
+    if (h.newProvince && h.newProvince !== h.oldProvince) newParts.push(h.newProvince);
+    newLocLine = newParts.join(", ");
+  }
+
   return `
     <div class="card ${typeClass}">
       <div class="card-name">${escapeHTML(h.name)}</div>
       ${locationLine ? `<div class="card-location">${escapeHTML(locationLine)}</div>` : ""}
+      ${newLocLine ? `<div class="card-new-location">${escapeHTML(newLocLine)} (mới)</div>` : ""}
       ${h.address ? `<div class="card-address">${escapeHTML(h.address)}</div>` : ""}
       <div class="card-meta">
         ${phonePart}${mapPart}${webPart}

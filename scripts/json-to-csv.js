@@ -11,7 +11,7 @@ const csvPath = path.join(__dirname, "..", "data", "hospitals.csv");
 
 const data = JSON.parse(fs.readFileSync(dataPath, "utf-8"));
 
-const COLUMNS = ["name", "type", "district", "city", "address", "phone", "website", "mapsUrl"];
+const COLUMNS = ["name", "type", "district", "city", "oldDistrict", "oldProvince", "newWard", "newProvince", "address", "phone", "website", "mapsUrl"];
 
 function escapeCSV(val) {
   if (!val) return "";

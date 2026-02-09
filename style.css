@@ -242,6 +242,13 @@ body {
   margin-bottom: 2px;
 }
 
+.card-new-location {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+
 .card-address {
   font-size: 0.82rem;
   color: var(--text-secondary);
