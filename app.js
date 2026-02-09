@@ -105,10 +105,9 @@ function updateDistrictFilter() {
       )
     : allHospitals;
 
-  // Collect both current and old district names
+  // Collect only old district names (familiar to users)
   const districtSet = new Set();
   for (const h of filtered) {
-    if (h.district) districtSet.add(h.district);
     if (h.oldDistrict) districtSet.add(h.oldDistrict);
   }
   const districts = [...districtSet].sort((a, b) => a.localeCompare(b, "vi"));
